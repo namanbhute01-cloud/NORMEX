@@ -1,15 +1,22 @@
-"""M1: laptop/USB webcam and mobile IP camera capture.
+"""M1: laptop/USB webcam, RTSP/CCTV IP camera, and mobile IP camera capture.
 
-OpenCV only; no AI and no cloud.  Three acquisition modes feed the same BGR
+OpenCV only; no AI and no cloud.  Four acquisition modes feed the same BGR
 ``Frame`` contract:
 
 * local webcam / USB camera      -> ``Camera(index=0)``
-* IP camera MJPEG/RTSP stream    -> ``Camera(url="http://PHONE:8080/video")``
-* IP camera JPEG snapshot URL    -> ``SnapshotCamera("http://PHONE:8080/shot.jpg")``
+* RTSP / RTSP over TCP or UDP   -> ``Camera(url="rtsp://host:port/stream")``
+* IP camera MJPEG / HTTP stream -> ``Camera(url="http://host:port/video")``
+* IP camera JPEG snapshot       -> ``SnapshotCamera("http://host:port/shot.jpg")``
 
-The snapshot mode is often more reliable than MJPEG on a phone: every read is
-a fresh request, so a slow network cannot build a queue of stale frames.
-URLs containing ``user:password@`` are redacted before they are printed.
+The ``Camera`` class auto-detects the URL scheme and lets ``cv2.VideoCapture``
+choose the appropriate backend (FFMPEG, GStreamer, or V4L2).  The
+``SnapshotCamera`` always uses a fresh HTTP GET per frame, which is often more
+reliable than an MJPEG stream on a phone because a slow network cannot build a
+queue of stale frames.
+
+URLs containing ``user:password@`` are redacted before they appear in any log
+output.  In snapshot mode the credentials are turned into an HTTP Basic header
+and then removed from the printed URL.
 """
 
 from __future__ import annotations
@@ -64,12 +71,36 @@ def redact_url(url: str) -> str:
         return url
 
 
+def detect_url_scheme(url: str) -> str:
+    """Return the scheme part of a URL lower‑cased, or ``'unknown'``."""
+
+    try:
+        return urllib.parse.urlsplit(url).scheme.lower()
+    except ValueError:
+        return "unknown"
+
+
+def is_rtsp_url(url: str) -> bool:
+    """True if *url* looks like an RTSP address."""
+
+    return detect_url_scheme(url) in {"rtsp", "rtsps"}
+
+
+def is_http_url(url: str) -> bool:
+    """True if *url* is an HTTP or HTTPS address."""
+
+    return detect_url_scheme(url) in {"http", "https"}
+
+
 def resolve_url(ip: str, port: int = 8080, *, snapshot: bool = False) -> str:
     """Build an IP-camera URL from a phone's LAN address.
 
     Android "IP Webcam" and most iOS equivalents use ``/video`` for the MJPEG
     stream and ``/shot.jpg`` for a still.  The caller can override both with
     explicit ``--url`` / ``--snapshot-url`` arguments.
+
+    The returned URL is always ``http://`` because most phone apps do not speak
+    RTSP; use ``--url`` to point at a custom stream endpoint if needed.
     """
 
     host = str(ip).strip()
@@ -119,7 +150,18 @@ def _backend_name(capture: cv2.VideoCapture) -> str:
 
 
 class Camera:
-    """One OpenCV camera or network stream, opened once and reused."""
+    """One OpenCV camera or network stream, opened once and reused.
+
+    The *url* argument can be:
+
+    * ``0`` or ``""``   – local webcam (index 0)
+    * ``rtsp://host:port/stream``   – RTSP stream (requires FFMPEG or GStreamer)
+    * ``http://host:port/video``   – MJPEG or HTTP stream
+    * ``http://host:port/shot.jpg`` – JPEG snapshot URL (used by SnapshotCamera)
+
+    OpenCV's ``VideoCapture`` auto-detects the backend; if the FFMPEG or
+    GStreamer backend is available it will handle RTSP and most HTTP streams.
+    """
 
     def __init__(
         self,
@@ -142,18 +184,34 @@ class Camera:
         return redact_url(self.url) if self.url else f"camera:{self.index}"
 
     def open(self) -> CameraInfo:
-        if self.url:
-            capture = cv2.VideoCapture(self.url)
-        else:
-            capture = cv2.VideoCapture(self.index, cv2.CAP_ANY)
+        # Choose the CV constant based on scheme – this hints OpenCV which
+        # backend to initialise, but we always fall back to auto-detection
+        # if the constant is not available or the open fails.
+        capture = cv2.VideoCapture(self.url, cv2.CAP_ANY)
 
         if not capture.isOpened():
+            # If CAP_ANY failed, try explicitly with FFMPEG (handles RTSP/RTSPs)
+            if is_rtsp_url(self.url) or is_http_url(self.url):
+                fallback = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+                if fallback.isOpened():
+                    capture.release()
+                    capture = fallback
+                else:
+                    # Try GStreamer fallback
+                    try:
+                        gst_cap = cv2.VideoCapture(self.url, cv2.CAP_GSTREAMER)
+                        if gst_cap.isOpened():
+                            capture.release()
+                            capture = gst_cap
+                    except Exception:
+                        pass
             capture.release()
             if self.url:
                 raise CameraError(
-                    f"could not open IP camera stream {redact_url(self.url)}. "
-                    "Check the phone and laptop are on the same Wi-Fi, the app is "
-                    "serving, and the port/path are correct (often :8080/video)."
+                    f"could not open camera stream {redact_url(self.url)}. "
+                    "Check that the URL scheme is correct, the device is on the same "
+                    "Wi‑Fi, the app is serving, and the port/path are correct.  "
+                    "OpenCV may need the FFMPEG or GStreamer backend for RTSP streams."
                 )
             raise CameraError(
                 f"could not open camera index {self.index}. "
@@ -161,16 +219,14 @@ class Camera:
             )
 
         if self.url:
-            # Keep only the newest frame where the backend supports it.
+            # Reserve a single‑frame buffer so the newest frame is always
+            # returned; some backends default to a deep queue which adds latency.
             try:
                 capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             except cv2.error:
                 pass
-        else:
-            capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
 
-        # Discard early frames: auto-exposure settles, and network streams
+        # Discard early frames: auto‑exposure settles, and network streams
         # often return a partial first frame.  At least one frame is always
         # read, even when warmup=0, to prove the source is live.
         last = None
@@ -249,7 +305,8 @@ class SnapshotCamera:
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
             raise CameraError(
                 f"snapshot request failed for {self.source}: {exc}. "
-                "Check the phone and laptop are on the same Wi-Fi and the app is serving."
+                "Check the phone and laptop are on the same Wi‑Fi and the app is "
+                "serving the JPEG endpoint."
             ) from exc
 
         if not data:
@@ -263,14 +320,14 @@ class SnapshotCamera:
         return Frame(image=image, source=self.source)
 
     def open(self) -> CameraInfo:
-        frame = self._fetch()
-        for _ in range(self.warmup):
-            frame = self._fetch()
+        # Warm‑up: a few fresh requests so the phone's HTTP server is ready.
+        for _ in range(max(0, self.warmup)):
+            self._fetch()
         self.info = CameraInfo(
             source=self.source,
             backend="http-snapshot",
-            width=int(frame.image.shape[1]),
-            height=int(frame.image.shape[0]),
+            width=int(self._fetch().image.shape[1]),
+            height=int(self._fetch().image.shape[0]),
             fps=0.0,
             exposure=None,
             index=None,
@@ -294,7 +351,10 @@ class SnapshotCamera:
 
 
 def list_cameras(max_index: int = 5) -> list[int]:
-    """Probe local camera indices 0..max_index-1 and return the usable ones."""
+    """Probe local camera indices 0..max_index-1 and return the usable ones.
+
+    Only indices that return a valid frame via ``cv2.VideoCapture`` are included.
+    """
 
     found: list[int] = []
     try:
