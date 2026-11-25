@@ -1,0 +1,55 @@
+# Low-latency variant of default.yaml: 192x192 input.
+#
+# Use this ONLY when the target CPU cannot meet P95 < 1 s at 256x256.
+# It must be used for BOTH training and inspection (the config hash covers
+# input.size, so a 256 profile will refuse to load under this config).
+#
+# Measured on the dev machine (Celeron N4500, 2 cores, under load):
+#   256x256: 883 ms mean / 1214 ms p95 steady-state  -> fails the 1 s gate
+#   192x192: 517 ms mean /  645 ms p95 steady-state  -> passes
+# Synthetic AUROC stayed at 1.0 at 192, but a 192 E2E run failed the 24 px
+# localization check on one scratch (peak 36.4 px). Verify localization on
+# your own smallest defects before accepting this tradeoff.
+
+seed: 0
+
+backbone:
+  weights: pretrained/resnet18.pth
+
+input:
+  size: 192
+
+embedding:
+  d: 100
+  pool: 2
+
+algo:
+  name: padim
+  padim:
+    eps: 0.01
+
+train:
+  augment_factor: 4
+  augment:
+    shift: 0.03
+    rot_deg: 3.0
+    brightness: 0.10
+    contrast: 0.10
+    flip: false
+  batch_size: 16
+
+calibration:
+  kfold: 5
+  sigma_k: 3.0
+  review_margin: 1.15
+
+anomaly_map:
+  sigma: 4
+  image_score: max
+  topk_frac: 0.01
+
+quality:
+  enabled: true
+
+runtime:
+  threads: auto
