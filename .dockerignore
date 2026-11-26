@@ -1,0 +1,15 @@
+# Keep the image small and reproducible. Datasets, trained profiles and results
+# are mounted at runtime (see docker-compose.yml).
+.venv/
+datasets/
+profiles/
+results/
+logs/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.git/
+.gitignore
+configs/camera.json

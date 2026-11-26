@@ -1,0 +1,80 @@
+# MVTec benchmark config for memory-constrained CPUs (2-core Celeron, ~2 GB free).
+#
+# Same model as default.yaml (256x256, ResNet18+PaDiM, d=100, pool=2) but with
+# augment_factor 1 and batch_size 4 so training fits in ~2 GB RAM.
+# Use for BOTH training and inspection (config hash covers the feature keys).
+
+seed: 0
+
+backbone:
+  weights: pretrained/resnet18.pth
+
+input:
+  size: 256
+
+preprocess:
+  keep_aspect: true
+  pad_value: 0
+  roi:
+    enabled: false
+    x: 0
+    y: 0
+    width: 0
+    height: 0
+  align:
+    enabled: false
+    reference: ""
+    max_shift_px: 8.0
+    max_rotation_deg: 2.0
+  denoise:
+    enabled: false
+    method: median
+    ksize: 3
+    d: 5
+    sigma_color: 25.0
+    sigma_space: 25.0
+  illumination:
+    enabled: false
+    method: background
+    sigma: 40.0
+    gamma: 1.0
+    target: 128.0
+    clip_limit: 2.0
+    tile_grid: 8
+
+embedding:
+  d: 100
+  pool: 2
+
+algo:
+  name: padim
+  padim:
+    eps: 0.01
+
+train:
+  augment_factor: 1
+  augment:
+    shift: 0.03
+    rot_deg: 3.0
+    brightness: 0.10
+    contrast: 0.10
+    flip: false
+  batch_size: 4
+
+calibration:
+  kfold: 5
+  sigma_k: 3.0
+  review_margin: 1.15
+
+anomaly_map:
+  sigma: 4
+  image_score: max
+  topk_frac: 0.01
+
+quality:
+  enabled: true
+  check_foreground: true
+  require_same_size: true
+
+runtime:
+  threads: auto

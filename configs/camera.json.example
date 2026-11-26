@@ -1,0 +1,5 @@
+{
+  "_comment": "Optional. The intro page writes this file automatically when you connect a camera. Android 'IP Webcam' uses port 8080 and paths /video (stream) or /shot.jpg (snapshot).",
+  "url": "http://192.168.1.100:8080/video",
+  "snapshot_url": ""
+}

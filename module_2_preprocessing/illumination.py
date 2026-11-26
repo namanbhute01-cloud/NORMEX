@@ -22,6 +22,39 @@ def _background_correction(img_bgr: np.ndarray, sigma: float) -> np.ndarray:
     return np.clip(corrected, 0, 255).astype(np.uint8)
 
 
+def _exposure_normalization(
+    img_bgr: np.ndarray,
+    target: float = 128.0,
+    border_frac: float = 0.05,
+) -> np.ndarray:
+    """Scale the whole image so the background sits at ``target``.
+
+    The background is estimated from the border, which is assumed to show the
+    conveyor/backdrop rather than the part.  A single scalar gain is applied to
+    all three channels, so hue and saturation (and therefore discolouration
+    defects) are preserved -- only global exposure changes are removed.
+
+    This is the software fallback for a test/train lighting drift.  Prefer
+    locking exposure and lighting physically.
+    """
+
+    height, width = img_bgr.shape[:2]
+    band = max(1, int(round(min(height, width) * float(border_frac))))
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    border = np.concatenate(
+        [
+            gray[:band, :].ravel(),
+            gray[-band:, :].ravel(),
+            gray[:, :band].ravel(),
+            gray[:, -band:].ravel(),
+        ]
+    ).astype(np.float32)
+    level = max(float(np.median(border)), 1.0)
+    gain = float(np.clip(float(target) / level, 0.5, 2.0))
+    corrected = img_bgr.astype(np.float32) * gain
+    return np.clip(corrected, 0, 255).astype(np.uint8)
+
+
 def _gamma_correction(img_bgr: np.ndarray, gamma: float) -> np.ndarray:
     inverse = 1.0 / float(gamma)
     table = ((np.arange(256, dtype=np.float32) / 255.0) ** inverse * 255.0).astype(np.uint8)
@@ -48,6 +81,12 @@ def apply(img_bgr: np.ndarray, cfg: dict | None) -> np.ndarray:
     method = str(cfg.get("method", "background"))
     if method == "background":
         return _background_correction(img_bgr, float(cfg.get("sigma", 40.0)))
+    if method == "exposure":
+        return _exposure_normalization(
+            img_bgr,
+            float(cfg.get("target", 128.0)),
+            float(cfg.get("border_frac", 0.05)),
+        )
     if method == "gamma":
         return _gamma_correction(img_bgr, float(cfg.get("gamma", 1.0)))
     if method == "clahe":
@@ -58,5 +97,5 @@ def apply(img_bgr: np.ndarray, cfg: dict | None) -> np.ndarray:
         )
     raise ValueError(
         f"unknown illumination method {method!r} "
-        "(expected 'background', 'gamma' or 'clahe')"
+        "(expected 'background', 'exposure', 'gamma' or 'clahe')"
     )

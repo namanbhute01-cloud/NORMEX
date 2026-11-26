@@ -1,0 +1,31 @@
+[Unit]
+Description=NORMEX good-only visual inspection dashboard
+Documentation=file:///opt/normex/main_folder/README_QUICKSTART.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=normex
+Group=normex
+WorkingDirectory=/opt/normex/main_folder
+
+# The camera URL normally comes from configs/camera.json (written when you
+# connect from the intro page).  Uncomment to override it for this service:
+# Environment=NORMEX_CAMERA_URL=http://192.168.1.100:8080/video
+# Environment=NORMEX_SNAPSHOT_URL=http://192.168.1.100:8080/shot.jpg
+
+ExecStart=/opt/normex/main_folder/.venv/bin/python dashboard_server.py --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+
+# Hardening: the process only needs its own folder and the network.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/normex/main_folder/profiles /opt/normex/main_folder/results /opt/normex/main_folder/configs /opt/normex/main_folder/logs
+
+[Install]
+WantedBy=multi-user.target

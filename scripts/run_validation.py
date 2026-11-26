@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import resource
 import sys
 import time
@@ -45,6 +46,9 @@ from module_5_decision.decide import decide  # noqa: E402
 
 MAX_TRAIN_SECONDS = 600.0
 MAX_P95_LATENCY_MS = 1000.0
+MIN_IMAGE_AUROC = 0.95
+MAX_MISSED_DEFECT_RATE = 0.10   # FAR here = defective image marked GOOD
+MAX_FALSE_REJECT_RATE = 0.05    # FRR = good image marked DEFECTIVE
 BOTTLE_AUROC_GATE = 0.97
 
 
@@ -163,7 +167,12 @@ def evaluate_category(
     gates = {
         "train_seconds<=600": record["train_seconds"] <= MAX_TRAIN_SECONDS,
         "latency_p95<1000ms": record["latency_ms_p95"] < MAX_P95_LATENCY_MS,
+        "image_auroc>=0.95": record["image_auroc"] >= MIN_IMAGE_AUROC,
     }
+    if not math.isnan(record["far"]):
+        gates["missed_defects<=0.10"] = record["far"] <= MAX_MISSED_DEFECT_RATE
+    if not math.isnan(record["frr"]):
+        gates["false_rejects<=0.05"] = record["frr"] <= MAX_FALSE_REJECT_RATE
     if category == "bottle":
         gates["bottle_auroc>=0.97"] = record["image_auroc"] >= BOTTLE_AUROC_GATE
     record["gates"] = gates

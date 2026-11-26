@@ -54,6 +54,7 @@ def default_preprocess_cfg() -> dict:
             "enabled": False,
             "method": "background",
             "sigma": 40.0,
+            "target": 128.0,
             "gamma": 1.0,
             "clip_limit": 2.0,
             "tile_grid": 8,

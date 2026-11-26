@@ -29,8 +29,9 @@ preprocess:
     sigma_space: 25.0
   illumination:
     enabled: false      # benchmark before enabling
-    method: background  # background | gamma | clahe
+    method: background  # background | exposure | gamma | clahe
     sigma: 40.0
+    target: 128.0       # exposure method: background level after correction
     gamma: 1.0
     clip_limit: 2.0
     tile_grid: 8

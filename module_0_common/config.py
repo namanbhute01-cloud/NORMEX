@@ -63,6 +63,7 @@ _ALLOWED_LEAVES = {
     "preprocess.illumination.gamma",
     "preprocess.illumination.clip_limit",
     "preprocess.illumination.tile_grid",
+    "preprocess.illumination.target",
     "quality.enabled",
     "quality.check_foreground",
     "quality.require_same_size",
@@ -99,6 +100,7 @@ _HASH_KEYS = (
     "preprocess.illumination.gamma",
     "preprocess.illumination.clip_limit",
     "preprocess.illumination.tile_grid",
+    "preprocess.illumination.target",
 )
 
 
@@ -227,7 +229,7 @@ def validate_config(cfg: dict) -> None:
     _require_int(flat, "preprocess.denoise.d", 1, 15)
     _require_float(flat, "preprocess.denoise.sigma_color", 1.0, 100.0)
     _require_float(flat, "preprocess.denoise.sigma_space", 1.0, 100.0)
-    if flat["preprocess.illumination.method"] not in {"background", "gamma", "clahe"}:
+    if flat["preprocess.illumination.method"] not in {"background", "exposure", "gamma", "clahe"}:
         raise ValueError(
             "config: preprocess.illumination.method must be 'background', 'gamma' or 'clahe'"
         )

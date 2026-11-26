@@ -86,7 +86,13 @@ class PaDiM:
         X = E.reshape(B, d, -1).float() - self.mean  # [B,d,P]
         transformed = torch.einsum("bdp,pde->bpe", X, self.inv)
         squared = (transformed * X.permute(0, 2, 1)).sum(dim=-1)  # [B,P]
-        return squared.clamp_min(0.0).sqrt().reshape(B, H, W)
+        squared = squared.clamp_min(0.0)
+        # MKL's VML sqrt dispatches an AVX-encoded kernel on some non-AVX
+        # Celerons (SIGILL in mkl_vml_kernel_sSqrt).  NumPy's sqrt is safe there
+        # and the transfer is negligible for these small [B,P] maps.
+        if squared.device.type == "cpu":
+            return torch.from_numpy(np.sqrt(squared.numpy())).reshape(B, H, W)
+        return squared.sqrt().reshape(B, H, W)
 
     def state(self) -> dict[str, np.ndarray]:
         """Serializable float32 state (``mean`` [d,P], ``inv_cov`` [P,d,d])."""
